@@ -7,6 +7,8 @@ class RecordingInterceptor extends HttpInterceptor {
   final List<http.Response> responses = [];
   final List<http.Response> errors = [];
   int retryCallCount = 0;
+
+  /// Set to true to return [Duration.zero] from [shouldRetry] (retry immediately).
   bool retryResponse = false;
 
   @override
@@ -15,8 +17,12 @@ class RecordingInterceptor extends HttpInterceptor {
   }
 
   @override
-  Future<void> onResponse(http.Response response, http.Request request) async {
+  Future<http.Response> onResponse(
+    http.Response response,
+    http.Request request,
+  ) async {
     responses.add(response);
+    return response;
   }
 
   @override
@@ -25,14 +31,14 @@ class RecordingInterceptor extends HttpInterceptor {
   }
 
   @override
-  Future<bool> shouldRetry(
+  Future<Duration?> shouldRetry(
     Object error,
     StackTrace stackTrace,
     http.Request request, {
     http.Response? response,
   }) async {
     retryCallCount++;
-    return retryResponse;
+    return retryResponse ? Duration.zero : null;
   }
 }
 
@@ -56,19 +62,21 @@ class TokenRefreshInterceptor extends HttpInterceptor {
 
   @override
   Future<void> onError(http.Response response, http.Request request) async {
-    if (response.statusCode == 401) {
+    if (response.statusCode == HttpStatusCode.unauthorized) {
       refreshed = true;
       request.headers['Authorization'] = 'Bearer $newToken';
     }
   }
 
   @override
-  Future<bool> shouldRetry(
+  Future<Duration?> shouldRetry(
     Object error,
     StackTrace stackTrace,
     http.Request request, {
     http.Response? response,
   }) async {
-    return response?.statusCode == 401 && refreshed;
+    return response?.statusCode == HttpStatusCode.unauthorized && refreshed
+        ? Duration.zero
+        : null;
   }
 }

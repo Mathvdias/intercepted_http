@@ -70,14 +70,14 @@ void main() {
       );
     });
 
-    test('shouldRetry default returns false', () async {
+    test('shouldRetry default returns null (no retry)', () async {
       const interceptor = _RequestOnlyInterceptor();
       final result = await interceptor.shouldRetry(
         Exception('test'),
         StackTrace.empty,
         http.Request('GET', Uri.parse('https://example.com/')),
       );
-      expect(result, isFalse);
+      expect(result, isNull);
     });
   });
 
@@ -250,6 +250,33 @@ void main() {
       );
       expect(recorder.responses.single.statusCode, 404);
     });
+
+    test('interceptor can replace the response body', () async {
+      final inner = MockClient(
+        (_) async => http.Response('{"data":{"value":42}}', 200),
+      );
+      final client = _build(
+        inner: inner,
+        interceptors: [_UnwrapDataInterceptor()],
+      );
+      final response = await client.get(Uri.parse('https://example.com/'));
+      expect(response.body, '{"value":42}');
+    });
+
+    test('multiple interceptors chain their transformations', () async {
+      final inner = MockClient(
+        (_) async => http.Response('original', 200),
+      );
+      final client = _build(
+        inner: inner,
+        interceptors: [
+          _AppendInterceptor(' first'),
+          _AppendInterceptor(' second'),
+        ],
+      );
+      final response = await client.get(Uri.parse('https://example.com/'));
+      expect(response.body, 'original first second');
+    });
   });
 
   // ── onError ────────────────────────────────────────────────────────────────
@@ -367,6 +394,78 @@ void main() {
     });
   });
 
+  // ── shouldRetry delay ──────────────────────────────────────────────────────
+  group('shouldRetry delay', () {
+    test('Duration.zero retries immediately on HTTP error', () async {
+      var calls = 0;
+      final inner = MockClient((_) async {
+        calls++;
+        return http.Response('', calls == 1 ? 503 : 200);
+      });
+      final response = await _build(
+        inner: inner,
+        interceptors: [RecordingInterceptor()..retryResponse = true],
+        throwOnError: false,
+      ).get(Uri.parse('https://example.com/'));
+
+      expect(calls, 2);
+      expect(response.statusCode, 200);
+    });
+
+    test('positive Duration retries after delay on HTTP error', () async {
+      var calls = 0;
+      final inner = MockClient((_) async {
+        calls++;
+        return http.Response('', calls == 1 ? 503 : 200);
+      });
+      final response = await _build(
+        inner: inner,
+        interceptors: [
+          _FixedDelayRetryInterceptor(const Duration(milliseconds: 1)),
+        ],
+        throwOnError: false,
+      ).get(Uri.parse('https://example.com/'));
+
+      expect(calls, 2);
+      expect(response.statusCode, 200);
+    });
+
+    test('positive Duration retries after delay on network exception',
+        () async {
+      var calls = 0;
+      final inner = MockClient((_) async {
+        calls++;
+        if (calls == 1) throw const SocketException('blip');
+        return http.Response('ok', 200);
+      });
+      final response = await _build(
+        inner: inner,
+        interceptors: [
+          _FixedDelayRetryInterceptor(const Duration(milliseconds: 1)),
+        ],
+        throwOnError: false,
+      ).get(Uri.parse('https://example.com/'));
+
+      expect(calls, 2);
+      expect(response.statusCode, 200);
+    });
+
+    test('null from shouldRetry does not retry', () async {
+      var calls = 0;
+      final inner = MockClient((_) async {
+        calls++;
+        return http.Response('', 503);
+      });
+      await _build(
+        inner: inner,
+        interceptors: [RecordingInterceptor()],
+        throwOnError: false,
+      ).get(Uri.parse('https://example.com/'));
+
+      expect(calls, 1);
+    });
+  });
+
   // ── close() ────────────────────────────────────────────────────────────────
   group('close()', () {
     test('closes the inner client', () {
@@ -394,4 +493,41 @@ class _OrderInterceptor extends HttpInterceptor {
 
   @override
   Future<void> onRequest(http.Request request) async => log.add(name);
+}
+
+class _UnwrapDataInterceptor extends HttpInterceptor {
+  @override
+  Future<http.Response> onResponse(
+    http.Response response,
+    http.Request request,
+  ) async {
+    final json = jsonDecode(response.body) as Map;
+    return http.Response(jsonEncode(json['data']), response.statusCode);
+  }
+}
+
+class _AppendInterceptor extends HttpInterceptor {
+  _AppendInterceptor(this.suffix);
+  final String suffix;
+
+  @override
+  Future<http.Response> onResponse(
+    http.Response response,
+    http.Request request,
+  ) async =>
+      http.Response('${response.body}$suffix', response.statusCode);
+}
+
+class _FixedDelayRetryInterceptor extends HttpInterceptor {
+  _FixedDelayRetryInterceptor(this.delay);
+  final Duration delay;
+
+  @override
+  Future<Duration?> shouldRetry(
+    Object error,
+    StackTrace stackTrace,
+    http.Request request, {
+    http.Response? response,
+  }) async =>
+      delay;
 }

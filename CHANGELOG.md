@@ -1,5 +1,24 @@
 # Changelog
 
+## 0.2.0
+
+**Breaking changes**
+
+- `HttpInterceptor.shouldRetry` now returns `Future<Duration?>` instead of
+  `Future<bool>`. Return `null` to skip retry, `Duration.zero` to retry
+  immediately, or any positive `Duration` to retry after a delay. This enables
+  exponential backoff and other delay strategies without extra packages.
+- `HttpInterceptor.onResponse` now returns `Future<http.Response>` instead of
+  `Future<void>`. The default implementation returns the response unchanged.
+  Interceptors can now replace the response (e.g. unwrap API envelopes) and
+  each interceptor in the list receives the output of the previous one.
+
+**Other changes**
+
+- `InterceptedHttp` maxRetries doc updated to reflect `Duration?` semantics.
+- Example updated with exponential backoff and response logging patterns.
+- All magic status numbers in library code replaced with `HttpStatusCode` constants.
+
 ## 0.1.1
 
 - Added `HttpStatusCode` — named constants for all common HTTP status codes (2xx–5xx).

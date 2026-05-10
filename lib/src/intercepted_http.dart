@@ -5,6 +5,7 @@ import 'package:http/http.dart' as http;
 import 'package:intercepted_http/src/extensions/request_extension.dart';
 import 'package:intercepted_http/src/http_exception.dart';
 import 'package:intercepted_http/src/http_interceptor.dart';
+import 'package:intercepted_http/src/http_status_code.dart';
 
 /// An [http.BaseClient] that pipes every request through a list of
 /// [HttpInterceptor]s before and after network I/O.
@@ -36,8 +37,8 @@ final class InterceptedHttp extends http.BaseClient {
   /// Request timeout. Defaults to 30 seconds.
   final Duration timeout;
 
-  /// Maximum number of retries when an interceptor's [shouldRetry] returns
-  /// true. Defaults to 1 to prevent runaway loops.
+  /// Maximum number of retries when an interceptor's [shouldRetry] returns a
+  /// non-null [Duration]. Defaults to 1 to prevent runaway loops.
   final int maxRetries;
 
   /// When true (default), throws [HttpClientException] on 4xx/5xx responses.
@@ -65,19 +66,21 @@ final class InterceptedHttp extends http.BaseClient {
       }
 
       final streamed = await _inner.send(request).timeout(timeout);
-      response = await http.Response.fromStream(streamed);
+      var current = await http.Response.fromStream(streamed);
 
       for (final interceptor in interceptors) {
-        await interceptor.onResponse(response, request);
+        current = await interceptor.onResponse(current, request);
       }
 
-      if (response.statusCode >= 400) {
+      response = current;
+
+      if (response.statusCode >= HttpStatusCode.badRequest) {
         for (final interceptor in interceptors) {
           await interceptor.onError(response, request);
         }
 
         if (retryCount < maxRetries) {
-          final shouldRetry = await _checkShouldRetry(
+          final delay = await _checkShouldRetry(
             HttpClientException(
               statusCode: response.statusCode,
               body: response.body,
@@ -86,7 +89,8 @@ final class InterceptedHttp extends http.BaseClient {
             request,
             response: response,
           );
-          if (shouldRetry) {
+          if (delay != null) {
+            if (delay > Duration.zero) await Future<void>.delayed(delay);
             // Use the current request: onError interceptors may have mutated
             // headers (e.g. new auth token) that must reach the server.
             return _sendWithRetry(
@@ -111,13 +115,14 @@ final class InterceptedHttp extends http.BaseClient {
       if (error is HttpClientException) rethrow;
 
       if (retryCount < maxRetries) {
-        final shouldRetry = await _checkShouldRetry(
+        final delay = await _checkShouldRetry(
           error,
           stackTrace,
           snapshot,
           response: response,
         );
-        if (shouldRetry) {
+        if (delay != null) {
+          if (delay > Duration.zero) await Future<void>.delayed(delay);
           return _sendWithRetry(
             snapshot.copyWith(),
             retryCount: retryCount + 1,
@@ -129,23 +134,22 @@ final class InterceptedHttp extends http.BaseClient {
     }
   }
 
-  Future<bool> _checkShouldRetry(
+  Future<Duration?> _checkShouldRetry(
     Object error,
     StackTrace stackTrace,
     http.Request request, {
     http.Response? response,
   }) async {
     for (final interceptor in interceptors) {
-      if (await interceptor.shouldRetry(
+      final delay = await interceptor.shouldRetry(
         error,
         stackTrace,
         request,
         response: response,
-      )) {
-        return true;
-      }
+      );
+      if (delay != null) return delay;
     }
-    return false;
+    return null;
   }
 
   static http.StreamedResponse _responseToStreamed(http.Response response) {

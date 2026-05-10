@@ -21,7 +21,7 @@ class AuthInterceptor extends HttpInterceptor {
 
   @override
   Future<void> onError(http.Response response, http.Request request) async {
-    if (response.statusCode == 401) {
+    if (response.statusCode == HttpStatusCode.unauthorized) {
       final newToken = await onRefresh();
       request.headers['Authorization'] = 'Bearer $newToken';
       _refreshed = true;
@@ -29,17 +29,17 @@ class AuthInterceptor extends HttpInterceptor {
   }
 
   @override
-  Future<bool> shouldRetry(
+  Future<Duration?> shouldRetry(
     Object error,
     StackTrace stackTrace,
     http.Request request, {
     http.Response? response,
   }) async {
-    if (response?.statusCode == 401 && _refreshed) {
+    if (response?.statusCode == HttpStatusCode.unauthorized && _refreshed) {
       _refreshed = false;
-      return true;
+      return Duration.zero;
     }
-    return false;
+    return null;
   }
 }
 
@@ -52,8 +52,12 @@ class LoggingInterceptor extends HttpInterceptor {
   }
 
   @override
-  Future<void> onResponse(http.Response response, http.Request request) async {
+  Future<http.Response> onResponse(
+    http.Response response,
+    http.Request request,
+  ) async {
     log('← ${response.statusCode} ${request.url}');
+    return response;
   }
 
   @override
@@ -62,18 +66,23 @@ class LoggingInterceptor extends HttpInterceptor {
   }
 }
 
-// ── 3. Retry on network errors ────────────────────────────────────────────────
+// ── 3. Retry on network errors with exponential backoff ──────────────────────
 
 class NetworkRetryInterceptor extends HttpInterceptor {
+  int _attempt = 0;
+
   @override
-  Future<bool> shouldRetry(
+  Future<Duration?> shouldRetry(
     Object error,
     StackTrace stackTrace,
     http.Request request, {
     http.Response? response,
   }) async {
     // Retry on timeouts and connection errors, never on HTTP errors
-    return response == null;
+    if (response != null) return null;
+    final delay = Duration(milliseconds: 200 * (1 << _attempt));
+    _attempt++;
+    return delay;
   }
 }
 
