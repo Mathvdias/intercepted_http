@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.1.1
+
+- Added `HttpStatusCode` — named constants for all common HTTP status codes (2xx–5xx).
+- `HttpClientException` getters (`isUnauthorized`, `isForbidden`, `isNotFound`, `isServerError`) now reference `HttpStatusCode` instead of magic numbers.
+- `HttpStatusCode` is exported from the main barrel so consumers can use it directly.
+
 ## 0.1.0
 
 - Initial release.

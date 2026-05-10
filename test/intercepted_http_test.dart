@@ -27,7 +27,6 @@ InterceptedHttp _build({
 http.Client _stub(int statusCode, {String body = ''}) =>
     MockClient((_) async => http.Response(body, statusCode));
 
-
 /// Interceptor that only overrides [onRequest] — leaving [onError] and
 /// [shouldRetry] as the base no-op defaults. Used to cover default bodies.
 class _RequestOnlyInterceptor extends HttpInterceptor {
@@ -86,7 +85,10 @@ void main() {
   group('HttpClientException', () {
     test('isUnauthorized for 401', () {
       expect(const HttpClientException(statusCode: 401).isUnauthorized, isTrue);
-      expect(const HttpClientException(statusCode: 403).isUnauthorized, isFalse);
+      expect(
+        const HttpClientException(statusCode: 403).isUnauthorized,
+        isFalse,
+      );
     });
 
     test('isForbidden for 403', () {
@@ -369,9 +371,13 @@ void main() {
   group('close()', () {
     test('closes the inner client', () {
       var closed = false;
-      final client = InterceptedHttp(client: _CloseTrackingClient(onClose: () {
-        closed = true;
-      },),);
+      final client = InterceptedHttp(
+        client: _CloseTrackingClient(
+          onClose: () {
+            closed = true;
+          },
+        ),
+      );
       client.close();
       expect(closed, isTrue);
     });

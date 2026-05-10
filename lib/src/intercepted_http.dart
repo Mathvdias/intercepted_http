@@ -89,8 +89,10 @@ final class InterceptedHttp extends http.BaseClient {
           if (shouldRetry) {
             // Use the current request: onError interceptors may have mutated
             // headers (e.g. new auth token) that must reach the server.
-            return _sendWithRetry(request.copyWith(),
-                retryCount: retryCount + 1,);
+            return _sendWithRetry(
+              request.copyWith(),
+              retryCount: retryCount + 1,
+            );
           }
         }
 
@@ -116,8 +118,10 @@ final class InterceptedHttp extends http.BaseClient {
           response: response,
         );
         if (shouldRetry) {
-          return _sendWithRetry(snapshot.copyWith(),
-              retryCount: retryCount + 1,);
+          return _sendWithRetry(
+            snapshot.copyWith(),
+            retryCount: retryCount + 1,
+          );
         }
       }
 
