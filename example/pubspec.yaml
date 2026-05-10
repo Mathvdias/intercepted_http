@@ -1,0 +1,11 @@
+name: intercepted_http_example
+description: Example usage of intercepted_http.
+publish_to: none
+
+environment:
+  sdk: '>=3.0.0 <4.0.0'
+
+dependencies:
+  intercepted_http:
+    path: ../
+  http: '>=0.13.0 <2.0.0'

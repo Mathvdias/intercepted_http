@@ -1,0 +1,24 @@
+name: intercepted_http
+description: >-
+  A composable HTTP interceptor layer for package:http. Add auth headers,
+  token refresh, retry logic, and logging without replacing your HTTP client.
+version: 0.1.0
+homepage: https://matheusvinicius.dev.br
+repository: https://github.com/Mathvdias/intercepted_http
+issue_tracker: https://github.com/Mathvdias/intercepted_http/issues
+
+topics:
+  - http
+  - networking
+  - interceptor
+  - middleware
+
+environment:
+  sdk: '>=3.0.0 <4.0.0'
+
+dependencies:
+  http: '>=0.13.0 <2.0.0'
+
+dev_dependencies:
+  lints: ^6.0.0
+  test: ^1.24.0

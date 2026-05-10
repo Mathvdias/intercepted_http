@@ -1,0 +1,21 @@
+include: package:lints/recommended.yaml
+
+analyzer:
+  language:
+    strict-casts: true
+    strict-inference: true
+    strict-raw-types: true
+
+linter:
+  rules:
+    - prefer_single_quotes
+    - require_trailing_commas
+    - always_declare_return_types
+    - avoid_print
+    - prefer_final_locals
+    - prefer_const_constructors
+    - prefer_const_declarations
+    - use_super_parameters
+    - unnecessary_lambdas
+    - avoid_redundant_argument_values
+    - document_ignores
