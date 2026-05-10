@@ -8,7 +8,7 @@ final client = InterceptedHttp(
   interceptors: [LoggingInterceptor(), AuthInterceptor()],
 );
 
-// Use it like any http.Client
+// Works exactly like http.Client
 final response = await client.get(Uri.parse('https://api.example.com/users'));
 ```
 
@@ -22,7 +22,7 @@ final response = await client.get(Uri.parse('https://api.example.com/users'));
 
 ```yaml
 dependencies:
-  intercepted_http: ^0.1.0
+  intercepted_http: ^0.2.0
 ```
 
 ## Quick start
@@ -32,7 +32,7 @@ import 'package:intercepted_http/intercepted_http.dart';
 
 final client = InterceptedHttp(
   interceptors: [MyInterceptor()],
-  timeout: Duration(seconds: 30),
+  timeout: const Duration(seconds: 30),
 );
 
 final response = await client.get(Uri.parse('https://api.example.com/todos'));
@@ -43,7 +43,7 @@ client.close();
 
 ## Writing interceptors
 
-Extend `HttpInterceptor` and override only the hooks you need:
+Extend `HttpInterceptor` and override only the hooks you need. Every hook has a no-op default, so you never have to call `super`.
 
 ```dart
 class AuthInterceptor extends HttpInterceptor {
@@ -56,12 +56,12 @@ class AuthInterceptor extends HttpInterceptor {
 
 ### Available hooks
 
-| Hook | When it runs |
-|------|-------------|
-| `onRequest` | Before the request is sent. Mutate headers, sign the request. |
-| `onResponse` | After every response — any status code. |
-| `onError` | Only when `statusCode >= 400`. |
-| `shouldRetry` | On network exceptions **or** after `onError`. Return `true` to retry. |
+| Hook | When it runs | Return |
+|------|-------------|--------|
+| `onRequest` | Before the request is sent. Mutate headers, sign the request. | `void` |
+| `onResponse` | After every response — any status code. Can transform the response. | `http.Response` |
+| `onError` | Only when `statusCode >= 400`. Refresh tokens, fire analytics. | `void` |
+| `shouldRetry` | On network exceptions **or** after `onError`. Return a `Duration` to retry after that delay, `null` to skip. | `Duration?` |
 
 ### Token refresh on 401
 
@@ -71,33 +71,67 @@ class TokenRefreshInterceptor extends HttpInterceptor {
 
   @override
   Future<void> onError(http.Response response, http.Request request) async {
-    if (response.statusCode == 401) {
-      final newToken = await refreshToken();         // your refresh logic
+    if (response.statusCode == HttpStatusCode.unauthorized) {
+      final newToken = await refreshToken();
       request.headers['Authorization'] = 'Bearer $newToken';
       _refreshed = true;
     }
   }
 
   @override
-  Future<bool> shouldRetry(Object error, StackTrace st, http.Request request,
-      {http.Response? response}) async {
-    if (response?.statusCode == 401 && _refreshed) {
+  Future<Duration?> shouldRetry(
+    Object error,
+    StackTrace st,
+    http.Request request, {
+    http.Response? response,
+  }) async {
+    if (response?.statusCode == HttpStatusCode.unauthorized && _refreshed) {
       _refreshed = false;
-      return true;                                   // retry with new token
+      return Duration.zero; // retry immediately with the new token
     }
-    return false;
+    return null;
   }
 }
 ```
 
-### Retry on network errors
+### Retry with exponential backoff
 
 ```dart
 class NetworkRetryInterceptor extends HttpInterceptor {
+  int _attempt = 0;
+
   @override
-  Future<bool> shouldRetry(Object error, StackTrace st, http.Request request,
-      {http.Response? response}) async {
-    return response == null; // only on exceptions, not HTTP errors
+  Future<Duration?> shouldRetry(
+    Object error,
+    StackTrace st,
+    http.Request request, {
+    http.Response? response,
+  }) async {
+    if (response != null) return null; // don't retry HTTP errors, only exceptions
+    final delay = Duration(milliseconds: 200 * (1 << _attempt));
+    _attempt++;
+    return delay; // 200ms, 400ms, 800ms, …
+  }
+}
+```
+
+### Response transformation
+
+`onResponse` returns `http.Response`, so interceptors can rewrite the response body. Each interceptor receives the output of the previous one, so transformations compose.
+
+```dart
+class UnwrapInterceptor extends HttpInterceptor {
+  @override
+  Future<http.Response> onResponse(
+    http.Response response,
+    http.Request request,
+  ) async {
+    // Unwrap {"data": {...}} envelope from every successful response
+    if (response.statusCode == 200) {
+      final json = jsonDecode(response.body) as Map;
+      return http.Response(jsonEncode(json['data']), response.statusCode);
+    }
+    return response;
   }
 }
 ```
@@ -112,30 +146,19 @@ class LoggingInterceptor extends HttpInterceptor {
   }
 
   @override
-  Future<void> onResponse(http.Response response, http.Request request) async {
+  Future<http.Response> onResponse(
+    http.Response response,
+    http.Request request,
+  ) async {
     print('← ${response.statusCode} ${request.url}');
+    return response; // pass through unchanged
+  }
+
+  @override
+  Future<void> onError(http.Response response, http.Request request) async {
+    print('✗ ${response.statusCode} ${request.url} — ${response.body}');
   }
 }
-```
-
-## Configuration
-
-```dart
-InterceptedHttp(
-  interceptors: [...],
-
-  // Inner client — use IOClient for mTLS, MockClient for tests
-  client: IOClient(),
-
-  // Per-request timeout (default: 30s)
-  timeout: Duration(seconds: 30),
-
-  // Max retry attempts per request (default: 1)
-  maxRetries: 1,
-
-  // Throw HttpClientException on 4xx/5xx (default: true)
-  throwOnError: true,
-)
 ```
 
 ## Error handling
@@ -148,12 +171,47 @@ try {
 } on HttpClientException catch (e) {
   print(e.statusCode);       // 404
   print(e.message);          // extracted from {"message": "..."}
+  print(e.body);             // raw response body
+  print(e.data);             // decoded JSON body, if any
   print(e.isUnauthorized);   // true if 401
+  print(e.isForbidden);      // true if 403
+  print(e.isNotFound);       // true if 404
   print(e.isServerError);    // true if >= 500
 }
 ```
 
-Set `throwOnError: false` to handle errors manually via `onError` interceptor.
+Set `throwOnError: false` to handle errors manually via the `onError` hook.
+
+## HTTP status constants
+
+Use `HttpStatusCode` instead of magic numbers:
+
+```dart
+if (e.statusCode == HttpStatusCode.unauthorized) { ... }
+if (e.statusCode == HttpStatusCode.tooManyRequests) { ... }
+```
+
+All common codes from 2xx to 5xx are included.
+
+## Configuration
+
+```dart
+InterceptedHttp(
+  interceptors: [...],
+
+  // Inner client — use IOClient for mTLS, MockClient for tests
+  client: IOClient(),
+
+  // Per-request timeout (default: 30s)
+  timeout: const Duration(seconds: 30),
+
+  // Max retry attempts per request (default: 1)
+  maxRetries: 3,
+
+  // Throw HttpClientException on 4xx/5xx (default: true)
+  throwOnError: true,
+)
+```
 
 ## Using a custom inner client
 
@@ -175,14 +233,15 @@ final client = InterceptedHttp(
 
 ## Interceptor execution order
 
-Interceptors run in the order they are listed in the `interceptors` list:
+Interceptors run in the order they are listed:
 
 ```
 [LoggingInterceptor, AuthInterceptor, RetryInterceptor]
-     onRequest:  Logging → Auth → Retry
-     onResponse: Logging → Auth → Retry
-     onError:    Logging → Auth → Retry
-     shouldRetry: Logging → Auth → Retry  (first true wins)
+
+  onRequest:   Logging → Auth → Retry
+  onResponse:  Logging → Auth → Retry  (each can transform the response)
+  onError:     Logging → Auth → Retry
+  shouldRetry: Logging → Auth → Retry  (first non-null Duration wins)
 ```
 
 ## License
