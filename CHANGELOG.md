@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.2.1
+
+- README updated to reflect v0.2.0 API (`Duration?` shouldRetry, `http.Response` onResponse, `HttpStatusCode` constants, response transformation and exponential backoff examples).
+
 ## 0.2.0
 
 **Breaking changes**
