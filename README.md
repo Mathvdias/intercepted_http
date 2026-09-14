@@ -1,7 +1,42 @@
 # intercepted_http
 
+[![CI](https://github.com/Mathvdias/intercepted_http/actions/workflows/ci.yml/badge.svg)](https://github.com/Mathvdias/intercepted_http/actions/workflows/ci.yml)
+[![Pub Version](https://img.shields.io/pub/v/intercepted_http.svg)](https://pub.dev/packages/intercepted_http)
+![Tests](https://img.shields.io/badge/tests-32%20passed-brightgreen)
+![Dart SDK](https://img.shields.io/badge/Dart-3.0+-0175C2.svg?logo=dart)
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](https://opensource.org/licenses/MIT)
+
 A composable interceptor layer for [`package:http`](https://pub.dev/packages/http).  
 Add auth headers, logging, token refresh, and retry logic — without replacing your HTTP client.
+
+```mermaid
+sequenceDiagram
+    autonumber
+    actor App
+    participant Interceptors as Interceptor Pipeline
+    participant Client as Inner http.Client
+    participant Server as Remote Server
+
+    App->>Interceptors: send(request)
+    Note over Interceptors: onRequest(request) hooks executed in order
+    Interceptors->>Client: Forward mutated request
+    Client->>Server: HTTP Request
+    Server-->>Client: HTTP Response / Socket Exception
+    alt Success (2xx)
+        Client-->>Interceptors: StreamedResponse
+        Note over Interceptors: onResponse(response) transformations
+        Interceptors-->>App: Final Response
+    else Error / 401 / 5xx
+        Client-->>Interceptors: Response / Error
+        Note over Interceptors: onError() & shouldRetry() logic
+        alt Should Retry (e.g. Refresh Token)
+            Note over Interceptors: Refresh token & rebuild request
+            Interceptors->>Client: Resend request
+        else No Retry
+            Interceptors-->>App: Throw HttpClientException
+        end
+    end
+```
 
 ```dart
 final client = InterceptedHttp(
