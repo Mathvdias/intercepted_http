@@ -93,7 +93,7 @@ final class InterceptedHttp extends http.BaseClient {
             if (delay > Duration.zero) await Future<void>.delayed(delay);
             // Use the current request: onError interceptors may have mutated
             // headers (e.g. new auth token) that must reach the server.
-            return _sendWithRetry(
+            return await _sendWithRetry(
               request.copyWith(),
               retryCount: retryCount + 1,
             );
@@ -123,7 +123,7 @@ final class InterceptedHttp extends http.BaseClient {
         );
         if (delay != null) {
           if (delay > Duration.zero) await Future<void>.delayed(delay);
-          return _sendWithRetry(
+          return await _sendWithRetry(
             snapshot.copyWith(),
             retryCount: retryCount + 1,
           );
